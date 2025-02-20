@@ -22,6 +22,7 @@ class ExcelControleProd:
             'Sala produtiv',
             'Local',
             'Horário',
+            'Riscos Detectados',  # Nova coluna
             'im com pred',
             'im sem predição'
         ]
@@ -90,12 +91,13 @@ class ExcelControleProd:
             ws.cell(row=next_row, column=1, value=dados.get('Sala produtiv', ''))
             ws.cell(row=next_row, column=2, value=dados.get('Local', ''))
             ws.cell(row=next_row, column=3, value=dados.get('Horário', ''))
+            ws.cell(row=next_row, column=4, value=dados.get('Riscos', ''))  # Nova coluna de riscos
 
             # Ajustar altura da linha para as imagens redimensionadas
             ws.row_dimensions[next_row].height = 80  # Reduzido de 120 para 80
 
             # Processar imagens
-            for col, img_path in [(4, imagem_pred_path), (5, imagem_sem_pred_path)]:
+            for col, img_path in [(5, imagem_pred_path), (6, imagem_sem_pred_path)]:  # Ajustado os índices das colunas
                 if img_path and os.path.exists(img_path):
                     try:
                         # Redimensionar imagem
@@ -113,8 +115,9 @@ class ExcelControleProd:
             ws.column_dimensions['A'].width = 15  # Sala produtiv
             ws.column_dimensions['B'].width = 15  # Local
             ws.column_dimensions['C'].width = 25  # Horário
-            ws.column_dimensions['D'].width = 25  # im com pred (reduzido de 40 para 25)
-            ws.column_dimensions['E'].width = 25  # im sem predição (reduzido de 40 para 25)
+            ws.column_dimensions['D'].width = 30  # Riscos Detectados
+            ws.column_dimensions['E'].width = 25  # im com pred
+            ws.column_dimensions['F'].width = 25  # im sem predição
 
             # Salvar workbook
             wb.save(self.arquivo_excel)
@@ -285,10 +288,14 @@ class VideoProcessor:
             
             caminho_original, caminho_anotado = caminhos_fotos
             
+            # Formatar os riscos detectados como uma string
+            riscos_str = ', '.join(lista_deteccoes) if lista_deteccoes else 'Nenhum'
+            
             dados = {
                 'Sala produtiv': self.dict_salas.get(channel_id, f'Sala {channel_id}'),
                 'Local': f'Camera {channel_id}',
                 'Horário': self.horario.strftime('%Y-%m-%d %H:%M:%S') if self.horario else datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'Riscos': riscos_str,  # Adiciona os riscos detectados
             }
             
             self.excel_controller.inserir_registro(
