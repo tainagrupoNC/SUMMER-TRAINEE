@@ -10,7 +10,7 @@ from roboflow import Roboflow
 import win32com.client as win32
 from openpyxl.drawing.image import Image
 import openpyxl
-
+from PIL import Image as PILImage
 # Configuração do logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -38,39 +38,85 @@ class ExcelControleProd:
         )
         self.logger = logging.getLogger(__name__)
 
-    def inserir_registro(self, dados, imagem_pred_path, imagem_sem_pred_path):
+    def redimensionar_imagem_excel(self, img_path):
+        """Redimensiona a imagem para um tamanho adequado para o Excel"""
         try:
+            # Carregar imagem
+            img = PILImage.open(img_path)
+            
+            # Definir dimensões máximas desejadas para a célula do Excel
+            max_width = 200  # pixels
+            max_height = 150  # pixels
+            
+            # Calcular proporção
+            ratio = min(max_width/float(img.size[0]), max_height/float(img.size[1]))
+            
+            # Calcular novas dimensões mantendo proporção
+            new_width = int(img.size[0] * ratio)
+            new_height = int(img.size[1] * ratio)
+            
+            # Redimensionar
+            img_resized = img.resize((new_width, new_height), PILImage.Resampling.LANCZOS)
+            
+            # Criar nome temporário para a imagem redimensionada
+            temp_path = f"temp_{os.path.basename(img_path)}"
+            img_resized.save(temp_path)
+            
+            return temp_path
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao redimensionar imagem para Excel: {str(e)}")
+            return img_path
+
+    def inserir_registro(self, dados, imagem_pred_path, imagem_sem_pred_path):
+        temp_files = []  # Lista para controlar arquivos temporários
+        try:
+            # Criar novo workbook se não existir
             if not os.path.exists(self.arquivo_excel):
                 wb = openpyxl.Workbook()
                 ws = wb.active
                 ws.title = self.sheet_name
+                # Escrever cabeçalhos
                 for col, header in enumerate(self.colunas, 1):
                     ws.cell(row=1, column=col, value=header)
             else:
                 wb = openpyxl.load_workbook(self.arquivo_excel)
                 ws = wb[self.sheet_name]
 
+            # Encontrar próxima linha vazia
             next_row = ws.max_row + 1
 
+            # Inserir dados do registro
             ws.cell(row=next_row, column=1, value=dados.get('Sala produtiv', ''))
             ws.cell(row=next_row, column=2, value=dados.get('Local', ''))
             ws.cell(row=next_row, column=3, value=dados.get('Horário', ''))
+
+            # Ajustar altura da linha para as imagens redimensionadas
+            ws.row_dimensions[next_row].height = 80  # Reduzido de 120 para 80
 
             # Processar imagens
             for col, img_path in [(4, imagem_pred_path), (5, imagem_sem_pred_path)]:
                 if img_path and os.path.exists(img_path):
                     try:
-                        img = Image(img_path)
-                        ws.row_dimensions[next_row].height = 120
+                        # Redimensionar imagem
+                        temp_path = self.redimensionar_imagem_excel(img_path)
+                        temp_files.append(temp_path)
+                        
+                        # Adicionar imagem redimensionada
+                        img = Image(temp_path)
                         img.anchor = f'{chr(64 + col)}{next_row}'
                         ws.add_image(img)
                     except Exception as e:
                         self.logger.error(f"Erro ao inserir imagem: {str(e)}")
 
             # Ajustar larguras das colunas
-            for col, width in zip(range(1, 6), [15, 15, 15, 40, 40]):
-                ws.column_dimensions[chr(64 + col)].width = width
+            ws.column_dimensions['A'].width = 15  # Sala produtiv
+            ws.column_dimensions['B'].width = 15  # Local
+            ws.column_dimensions['C'].width = 25  # Horário
+            ws.column_dimensions['D'].width = 25  # im com pred (reduzido de 40 para 25)
+            ws.column_dimensions['E'].width = 25  # im sem predição (reduzido de 40 para 25)
 
+            # Salvar workbook
             wb.save(self.arquivo_excel)
             wb.close()
 
@@ -80,6 +126,16 @@ class ExcelControleProd:
         except Exception as e:
             self.logger.error(f"Erro ao inserir registro: {str(e)}")
             return False
+            
+        finally:
+            # Limpar arquivos temporários
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except Exception as e:
+                    self.logger.error(f"Erro ao remover arquivo temporário {temp_file}: {str(e)}")
+
 
 class VideoProcessor:
     def __init__(self):
@@ -150,7 +206,8 @@ class VideoProcessor:
             cv2.rectangle(mask, (int(width//3), 0), (int(width//2), int(height//5)), 0, -1)
         elif channel_id == 2:
             cv2.rectangle(mask, (int(width//1.5), 0), (int(width//2), int(height//5)), 0, -1)
-        
+        elif channel_id == 3:
+            cv2.rectangle(mask, (int(width-200), 50), (int(width), int(height-200)), 0, -1) # SALA REV 150-01
         return mask
 
     def leitura_data_hora(self, frame):
@@ -347,7 +404,7 @@ class VideoProcessor:
 
     def realizar_predicao(self, frame, frame_original, channel_id):
         try:
-            dados = self.modelo.predict(frame, confidence=0.6, overlap=0.3).json()
+            dados = self.modelo.predict(frame, confidence=0.5, overlap=0.5).json()#self.modelo.predict(frame, confidence=0.6, overlap=0.3).json()
             pessoas = []
             riscos = []
 
